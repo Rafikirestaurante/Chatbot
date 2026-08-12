@@ -1,0 +1,20 @@
+{
+  "project": "Rafiki Chatbot",
+  "product": "Rafiki Recordatorios",
+  "version": "0.4.0",
+  "phase": "Fase 2B - Rafiki Agent Core",
+  "date": "2026-08-06",
+  "base": "0.3.0 Fase 2A",
+  "features": [
+    "agente especializado en TypeScript",
+    "sin IA externa",
+    "skills de recordatorios",
+    "memoria conversacional privada",
+    "respuestas naturales configurables",
+    "detección de ambigüedades",
+    "zona horaria por usuario",
+    "PWA multiusuario",
+    "panel administrador sin acceso a conversaciones",
+    "notificaciones locales y FCM"
+  ]
+}

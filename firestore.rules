@@ -1,0 +1,58 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isPlatformAdmin() {
+      return signedIn() && request.auth.token.platform_admin == true;
+    }
+
+    function isActiveUser(uid) {
+      return exists(/databases/$(database)/documents/platformUsers/$(uid))
+        && get(/databases/$(database)/documents/platformUsers/$(uid)).data.status == "active";
+    }
+
+    // Datos administrativos. El administrador puede ver cuentas y estados,
+    // pero no se concede acceso a conversations, messages ni reminders.
+    match /platformUsers/{uid} {
+      allow read: if isSelf(uid) || isPlatformAdmin();
+      allow create: if false;
+      allow update: if isSelf(uid)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["displayName", "photoURL", "lastSeenAt", "timezone", "agentPreferences", "updatedAt"]);
+      allow delete: if false;
+    }
+
+    // Invitaciones: solo las funciones administrativas usan Admin SDK.
+    match /accessInvitations/{emailKey} {
+      allow read, write: if false;
+    }
+
+    // Contenido privado: únicamente el propietario activo.
+    // No existe excepción para platform_admin.
+    match /users/{uid} {
+      allow read, write: if isSelf(uid) && isActiveUser(uid);
+
+      match /{document=**} {
+        allow read, write: if isSelf(uid) && isActiveUser(uid);
+      }
+    }
+
+    // Métricas agregadas sin contenido privado.
+    match /platformMetrics/{document=**} {
+      allow read: if isPlatformAdmin();
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
