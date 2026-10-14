@@ -1,7 +1,7 @@
 import { BellRing, BrainCircuit, Send, Sparkles } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createEmptyDialogueState, DEFAULT_AGENT_PREFERENCES } from "../agent/defaults";
-import { processAgentMessage } from "../agent/core";
+import { processHybridAgentMessage } from "../agent/geminiFallback";
 import { useAuth } from "../context/AuthContext";
 import {
   addMessage,
@@ -110,7 +110,7 @@ export function ChatPage() {
         deliveryState: "sent"
       });
 
-      const decision = processAgentMessage({
+      const decision = await processHybridAgentMessage({
         input: userText,
         now: new Date(),
         timezone: profile.timezone || "America/Bogota",
@@ -215,7 +215,7 @@ export function ChatPage() {
         <div className="bot-avatar"><Sparkles size={22} /></div>
         <div className="chat-identity">
           <h1>Rafiki</h1>
-          <span><BrainCircuit size={13} /> Agente privado · sin IA externa</span>
+          <span><BrainCircuit size={13} /> {preferences.useGeminiFallback !== false ? "Agente híbrido · Core local + Gemini" : "Agente privado · solo Core local"}</span>
         </div>
         <div className="pending-counter" data-count={pending.length}>
           <BellRing size={17} />
@@ -225,7 +225,7 @@ export function ChatPage() {
 
       <section className="chat-scroll">
         <div className="privacy-banner">
-          🔒 El agente procesa tus instrucciones dentro de Rafiki. El administrador no puede leer este chat.
+          🔒 Modo híbrido activo: tus recordatorios directos se procesan localmente en 0 ms y Gemini actúa como respaldo inteligente.
         </div>
 
         {messages.map((message) => {

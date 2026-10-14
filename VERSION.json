@@ -1,20 +1,18 @@
 {
   "project": "Rafiki Chatbot",
   "product": "Rafiki Recordatorios",
-  "version": "0.4.0",
-  "phase": "Fase 2B - Rafiki Agent Core",
-  "date": "2026-08-06",
-  "base": "0.3.0 Fase 2A",
+  "version": "0.5.0",
+  "phase": "Fase 2C - Híbrido: Rafiki Agent Core + Gemini Free Tier + Vercel",
+  "date": "2026-10-14",
+  "base": "0.4.0 Fase 2B",
   "features": [
-    "agente especializado en TypeScript",
-    "sin IA externa",
-    "skills de recordatorios",
-    "memoria conversacional privada",
-    "respuestas naturales configurables",
-    "detección de ambigüedades",
-    "zona horaria por usuario",
-    "PWA multiusuario",
-    "panel administrador sin acceso a conversaciones",
-    "notificaciones locales y FCM"
+    "motor híbrido: Rafiki Agent Core local (0 ms, $0) + respaldo inteligente Gemini API (Free Tier)",
+    "endpoint serverless /api/gemini para Vercel (Plan Hobby gratuito, oculta GEMINI_API_KEY)",
+    "soporte 100% gratuito combinando Vercel Hobby + Firebase Spark + Google AI Studio",
+    "corrección de compilación TypeScript y Vite para despliegue directo en Vercel",
+    "interruptor en Configuración para activar o desactivar el respaldo de Gemini por usuario",
+    "skills de recordatorios con memoria conversacional privada",
+    "respuestas naturales configurables en 4 personalidades",
+    "PWA multiusuario con panel administrador sin acceso a conversaciones"
   ]
 }

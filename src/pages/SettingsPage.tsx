@@ -168,6 +168,18 @@ export function SettingsPage() {
               />
             </label>
 
+            <label className="toggle-row">
+              <span>
+                <strong>Respaldo inteligente con Gemini (Modo Híbrido)</strong>
+                <small>Usa el motor local sin costo para comandos directos y consulta a Gemini (Free Tier) solo cuando una frase sea compleja o conversacional.</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={agentPreferences.useGeminiFallback !== false}
+                onChange={(event) => setPreference("useGeminiFallback", event.target.checked)}
+              />
+            </label>
+
             <div className="daypart-grid">
               <label>
                 “Por la mañana”

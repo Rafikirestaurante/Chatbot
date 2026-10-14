@@ -1,11 +1,11 @@
 {
   "name": "rafiki-chatbot-recordatorios",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -p tsconfig.app.json --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest run",
@@ -14,7 +14,8 @@
     "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
     "deploy:functions": "npm run deploy:functions-core",
     "deploy:functions-core": "npm --prefix functions run build && firebase deploy --only functions:registerCurrentUser,functions:adminInviteEmail,functions:adminSetUserStatus",
-    "deploy:functions-push": "npm --prefix functions run build && firebase deploy --only functions:dispatchDueReminders"
+    "deploy:functions-push": "npm --prefix functions run build && firebase deploy --only functions:dispatchDueReminders",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit"
   },
   "dependencies": {
     "firebase": "^12.0.0",

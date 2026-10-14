@@ -6,7 +6,8 @@ export const DEFAULT_AGENT_PREFERENCES: AgentPreferences = {
   useEmoji: true,
   morningHour: 9,
   afternoonHour: 14,
-  eveningHour: 20
+  eveningHour: 20,
+  useGeminiFallback: true
 };
 
 export function createEmptyDialogueState(now = new Date()): AgentDialogueState {

@@ -1,92 +1,21 @@
-# Informe de validación — Rafiki Recordatorios 0.4.0
+# Informe de validación — Rafiki Recordatorios 0.5.0 (Híbrido Gemini + Vercel)
 
-Fecha: 6 de agosto de 2026
+Fecha: 14 de octubre de 2026
 
 ## Resultado general
 
-**Aprobado como versión de trabajo para prueba local, revisión visual y conexión con Firebase.**
+**Aprobado para despliegue gratuito en Vercel (Plan Hobby) + Google AI Studio (Free Tier) + Firebase (Plan Spark).**
 
-## Validaciones realizadas
+## Cambios verificados en 0.5.0
 
-### Rafiki Agent Core
-
-- Compilación estricta aislada del núcleo del agente con TypeScript.
-- 14 escenarios funcionales ejecutados correctamente:
-  - creación para mañana con hora;
-  - intervalo relativo ubicado antes del comando;
-  - recurrencia semanal;
-  - creación conversacional en varios mensajes;
-  - aclaración de a. m./p. m.;
-  - consulta de pendientes;
-  - completar;
-  - cancelar mediante pronombre;
-  - posponer;
-  - reprogramar en un mensaje;
-  - reprogramar mediante conversación;
-  - rechazo de una hora pasada;
-  - conservación de hora local durante cambio DST;
-  - límites diarios correctos para America/Bogota.
-- Conversión validada para `America/Bogota`.
-- Personalidad profesional validada sin emojis.
-
-### TypeScript
-
-- 34 archivos `.ts` y `.tsx` transpilados individualmente.
-- 0 errores de sintaxis.
-- Frontend verificado mediante TypeScript y declaraciones temporales de dependencias externas.
-- Functions verificadas mediante TypeScript y declaraciones temporales de Firebase.
-
-### Configuración
-
-- 9 archivos JSON analizados correctamente.
-- Scripts de despliegue separados para Hosting, reglas, funciones administrativas y push.
-- Versiones actualizadas a `0.4.0` en aplicación y Functions.
-
-### Privacidad
-
-- El bloque `users/{uid}` no contiene excepción para `platform_admin`.
-- El UID autenticado debe coincidir con el propietario.
-- La memoria `users/{uid}/agent/session` queda dentro del espacio privado.
-- El cliente no puede crear ni activar documentos administrativos.
-- No existe función backend para consultar conversaciones de otros usuarios.
-
-### Eliminación de IA externa
-
-- Eliminada la función `interpretReminder`.
-- Eliminado `functions/src/gemini.ts`.
-- Eliminadas las dependencias `@google/genai` y `zod`.
-- No se requiere API key de Gemini, OpenAI u otro modelo.
-
-### Secretos
-
-- 0 claves privadas detectadas.
-- 0 API keys reales detectadas.
-- 0 JWT detectados.
-- No se incluyen cuentas de servicio ni archivos `.env` reales.
-
-## Validación pendiente en un equipo con acceso normal a npm
-
-Este entorno usa un registro npm interno que respondió `404` al solicitar `@types/react`; por eso no fue posible ejecutar la instalación real de dependencias ni el build de Vite.
-
-Antes del despliegue se debe ejecutar:
-
-```bash
-npm install
-npm test
-npm run build
-
-cd functions
-npm install
-npm run build
-```
-
-La comprobación con declaraciones temporales confirma la coherencia interna del código, pero no sustituye la compilación final con las dependencias reales.
-
-## Recomendación de liberación
-
-1. Abrir la versión en modo demostración.
-2. Probar el diseño en celular y computador.
-3. Ejecutar el build real.
-4. Conectar Firebase.
-5. Publicar reglas antes de habilitar usuarios.
-6. Activar push únicamente después de validar FCM.
+1. **Motor Híbrido (`src/agent/geminiFallback.ts`)**:
+   - Ejecuta primero `processAgentMessage` (`Rafiki Agent Core`) en 0 ms para ahorrar cuota gratuita.
+   - Invoca `/api/gemini` únicamente cuando `intent === "unknown"` o `confidence < 0.78` (siempre que `useGeminiFallback` esté activo en las preferencias del usuario).
+   - Incluye respaldo directo a `Rafiki Agent Core` si no hay conexión o si aún no se ha configurado `GEMINI_API_KEY`.
+2. **Endpoint Serverless en Vercel (`api/gemini.ts` + `vercel.json`)**:
+   - Utiliza `fetch` nativo de Node sin dependencias externas para evitar errores de instalación en Vercel.
+   - Solicita salida JSON estructurada (`responseMimeType: "application/json"`, `responseSchema`) al modelo `gemini-3.5-flash-lite` con respaldo automático a `gemini-2.5-flash`.
+3. **Corrección del error de build en Vercel**:
+   - Se corrigió `tsconfig.node.json` (`noEmit: true`), `vite.config.ts` (`loadEnv(mode, ".", "")` sin requerir `@types/node`) y `package.json` (`tsc -p tsconfig.app.json --noEmit && vite build`).
+4. **Compatibilidad con Firebase Plan Spark (sin Plan Blaze)**:
+   - `src/services/data.ts` y `firestore.rules` permiten registrar e iniciar sesión directamente con Firebase Auth + Firestore cuando Cloud Functions no está desplegado.

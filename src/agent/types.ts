@@ -22,6 +22,7 @@ export interface AgentPreferences {
   morningHour: number;
   afternoonHour: number;
   eveningHour: number;
+  useGeminiFallback?: boolean;
 }
 
 export type PendingDialogue =
@@ -88,6 +89,7 @@ export interface AgentDecision {
   reply: string;
   nextState: AgentDialogueState;
   referencedReminder?: Reminder;
+  source?: "local" | "gemini";
 }
 
 export interface AgentContext {

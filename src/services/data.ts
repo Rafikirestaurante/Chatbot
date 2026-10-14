@@ -59,10 +59,79 @@ function mapTimestamp(value: unknown): string {
 
 export async function registerCurrentUser(): Promise<AppUser> {
   if (demoMode) return getDemoUser();
-  assertFirebase();
-  const callable = httpsCallable(functions!, "registerCurrentUser");
-  const result = await callable();
-  return result.data as AppUser;
+  if (!db) throw new Error("Firebase no está configurado.");
+
+  // 1. Si Cloud Functions está desplegado (Plan Blaze), lo usa primero
+  if (functions) {
+    try {
+      const callable = httpsCallable(functions, "registerCurrentUser");
+      const result = await callable();
+      return result.data as AppUser;
+    } catch {
+      // Si el proyecto está en el Plan Spark gratuito (sin Cloud Functions),
+      // hace fallback directo a Firestore para no obligar a pagar el Plan Blaze.
+    }
+  }
+
+  const { auth } = await import("../config/firebase");
+  const currentUser = auth?.currentUser;
+  if (!currentUser) {
+    throw new Error("Debes iniciar sesión.");
+  }
+
+  const userRef = doc(db, "platformUsers", currentUser.uid);
+  const existing = await getDoc(userRef);
+  if (existing.exists()) {
+    await updateDoc(userRef, {
+      lastSeenAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }).catch(() => undefined);
+    const refreshed = await getPlatformUser(currentUser.uid);
+    if (refreshed) return refreshed;
+  }
+
+  const email = (currentUser.email || "").trim().toLowerCase();
+  const adminEmail = (import.meta.env.VITE_ADMIN_EMAIL || "").trim().toLowerCase();
+  const isAdmin = Boolean(adminEmail && email === adminEmail);
+
+  const newProfile: AppUser = {
+    uid: currentUser.uid,
+    email,
+    displayName: currentUser.displayName || email.split("@")[0] || "Usuario",
+    photoURL: currentUser.photoURL || null,
+    status: "active",
+    role: isAdmin ? "platform_admin" : "user",
+    timezone: "America/Bogota",
+    agentPreferences: {
+      tone: "warm",
+      responseLength: "balanced",
+      useEmoji: true,
+      morningHour: 9,
+      afternoonHour: 14,
+      eveningHour: 20,
+      useGeminiFallback: true
+    },
+    reminderCount: 0,
+    deviceCount: 0,
+    createdAt: iso(),
+    lastSeenAt: iso()
+  };
+
+  await setDoc(userRef, {
+    ...newProfile,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    lastSeenAt: serverTimestamp()
+  });
+
+  await addDoc(collection(db, "users", currentUser.uid, "messages"), {
+    role: "assistant",
+    text: "¡Hola! Soy Rafiki, tu agente híbrido de recordatorios. Puedes decirme: “Recuérdame pagar la luz mañana a las 8”.",
+    deliveryState: "sent",
+    createdAt: serverTimestamp()
+  });
+
+  return newProfile;
 }
 
 export async function getPlatformUser(uid: string): Promise<AppUser | null> {
