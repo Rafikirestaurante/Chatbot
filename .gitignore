@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.production
+.env.*
+!.env.example
+.firebase/
+firebase-debug.log
+functions/lib/
+service-account*.json
+*.pem
+*.key
+*.log
+.DS_Store
