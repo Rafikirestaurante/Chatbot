@@ -145,11 +145,11 @@ export default async function handler(req: any, res: any) {
     for (const model of candidateModels) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
         model
-      )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      )}:generateContent`;
 
       const response = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
         body: JSON.stringify({
           systemInstruction: {
             parts: [{ text: buildSystemInstruction(payload) }]
@@ -170,8 +170,8 @@ export default async function handler(req: any, res: any) {
       });
 
       if (!response.ok) {
-        const errBody = await response.text().catch(() => "");
-        lastError = `HTTP ${response.status} (${model}): ${errBody.slice(0, 200)}`;
+        await response.text().catch(() => "");
+        lastError = `El proveedor devolvió HTTP ${response.status}.`;
         if (response.status === 404 || response.status === 400) {
           continue;
         }
@@ -204,7 +204,7 @@ export default async function handler(req: any, res: any) {
     res.status(500).json({
       ok: false,
       reason: "exception",
-      message: error instanceof Error ? error.message : "Error interno en /api/gemini"
+      message: "Error interno en /api/gemini"
     });
   }
 }

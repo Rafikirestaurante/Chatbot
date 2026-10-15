@@ -1,5 +1,11 @@
 # Historial de versiones
 
+## Corrección de seguridad — 2026-10-15
+
+- Eliminadas las credenciales embebidas y el acceso directo a Gemini desde el navegador.
+- Gemini utiliza exclusivamente /api/gemini y una variable privada del servidor.
+- Excluidos los archivos de entorno privados del paquete.
+
 ## 0.5.0 — 2026-10-14 — Fase 2C (Híbrido: Rafiki Agent Core + Gemini Free Tier + Vercel)
 
 - Arquitectura híbrida en `src/agent/geminiFallback.ts`: ejecuta primero `Rafiki Agent Core` localmente (0 ms, $0 USD) y usa Gemini API (`gemini-3.5-flash-lite` / `gemini-2.5-flash`) como respaldo inteligente cuando la frase es compleja, conversacional o tiene baja confianza.

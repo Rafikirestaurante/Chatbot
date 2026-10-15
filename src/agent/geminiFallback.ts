@@ -83,64 +83,16 @@ async function fetchGeminiDecision(
     reminders: pendingReminders
   };
 
-  // 1. Intentar primero el endpoint Serverless /api/gemini (Vercel)
+  // Gemini se consulta exclusivamente a través del servidor.
   try {
     const response = await fetch("/api/gemini", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.ok && data?.decision) {
-        return data.decision as GeminiStructuredDecision;
-      }
-    }
-  } catch {
-    // Continúa al respaldo local si /api/gemini no está activo en vite dev puro
-  }
-
-  // 2. Respaldo opcional para pruebas locales en Vite (solo si se define VITE_GEMINI_API_KEY en .env.local)
-  const localDevKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!localDevKey) {
-    return null;
-  }
-
-  try {
-    const model = import.meta.env.VITE_GEMINI_MODEL || "gemini-3.5-flash-lite";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      model
-    )}:generateContent?key=${encodeURIComponent(localDevKey)}`;
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                text: `Eres Rafiki, asistente de recordatorios en español. Fecha actual: ${payload.nowIso} (${payload.timezone}). Devuelve JSON con {intent, confidence, reply, title?, dueAtIso?, recurrenceType?, filter?, targetReminderId?, postponeMinutes?, needsClarification?, missingFields?}. Datos: ${JSON.stringify(
-                  payload
-                )}`
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 350,
-          responseMimeType: "application/json"
-        }
-      })
-    });
-
     if (!response.ok) return null;
     const data = await response.json();
-    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!raw) return null;
-    return JSON.parse(raw) as GeminiStructuredDecision;
+    return data?.ok && data?.decision ? data.decision as GeminiStructuredDecision : null;
   } catch {
     return null;
   }
