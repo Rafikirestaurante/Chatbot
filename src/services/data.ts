@@ -231,7 +231,7 @@ export async function addMessage(
 
   if (!db) throw new Error("Firebase no está configurado.");
   const ref = await addDoc(collection(db, "users", uid, "messages"), {
-    ...message,
+    ...Object.fromEntries(Object.entries(message).filter(([, value]) => value !== undefined)),
     createdAt: serverTimestamp()
   });
   return ref.id;
