@@ -59,6 +59,7 @@ async function fetchGeminiDecision(context: AgentContext): Promise<GeminiStructu
       : response.status === 403 ? "Tu cuenta o configuración no permite usar Gemini."
       : response.status === 429 ? "Alcanzaste el límite de consultas. Intenta más tarde."
       : response.status === 422 ? "No pude validar la respuesta. Aclara la actividad, fecha o recordatorio."
+      : response.status >= 500 ? "El servidor de Rafiki no pudo procesar el mensaje. Intenta más tarde; si continúa, hay que revisar el servicio."
       : "No fue posible validar la solicitud. Intenta de nuevo.";
     throw new Error(message);
   }
