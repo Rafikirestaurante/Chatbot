@@ -125,7 +125,7 @@ function requireAuth(request: {
   return request.auth;
 }
 
-function requirePlatformAdmin(
+async function requirePlatformAdmin(
   request: { auth?: { uid: string; token: Record<string, unknown> } | null }
 ) {
   const auth = requireAuth(request);
@@ -135,6 +135,8 @@ function requirePlatformAdmin(
       "Esta operación requiere Administrador de Plataforma."
     );
   }
+  const profile = await db.doc(`platformUsers/${auth.uid}`).get();
+  if (profile.data()?.status !== "active") throw new HttpsError("permission-denied", "Administrador inactivo.");
   return auth;
 }
 
@@ -169,6 +171,7 @@ export const registerCurrentUser = onCall(
     const invitation = await invitationRef.get();
     const invited =
       invitation.exists &&
+      authUser.emailVerified === true &&
       invitation.data()?.active === true &&
       invitation.data()?.email === email;
 
@@ -229,7 +232,7 @@ export const registerCurrentUser = onCall(
 export const adminInviteEmail = onCall(
   { region: REGION, maxInstances: 5 },
   async (request) => {
-    const admin = requirePlatformAdmin(request);
+    const admin = await requirePlatformAdmin(request);
     const email = normalizeEmail(String(request.data?.email || ""));
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -251,7 +254,7 @@ export const adminInviteEmail = onCall(
 export const adminSetUserStatus = onCall(
   { region: REGION, maxInstances: 5 },
   async (request) => {
-    requirePlatformAdmin(request);
+    await requirePlatformAdmin(request);
     const uid = String(request.data?.uid || "");
     const status = String(request.data?.status || "");
 

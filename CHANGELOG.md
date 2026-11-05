@@ -1,3 +1,12 @@
+# 0.6.1 — 2026-11-05
+
+- Gemini como intérprete principal, con Core local para modo local y fallos del proveedor.
+- Endpoint autenticado con Firebase, cuentas activas y cuotas persistentes.
+- Reglas sin autoasignación administrativa ni autoactivación.
+- Validación de decisiones, fechas futuras y recordatorios propios pendientes.
+- Pruebas de acceso, cuotas, acciones y reglas con emulador.
+- Variables privadas y guía de migración documentadas.
+
 # Historial de versiones
 
 ## Corrección de seguridad — 2026-10-15

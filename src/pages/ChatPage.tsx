@@ -1,7 +1,7 @@
 import { BellRing, BrainCircuit, Send, Sparkles } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createEmptyDialogueState, DEFAULT_AGENT_PREFERENCES } from "../agent/defaults";
-import { processHybridAgentMessage } from "../agent/geminiFallback";
+import { isGeminiEnabled, processHybridAgentMessage } from "../agent/geminiFallback";
 import { useAuth } from "../context/AuthContext";
 import {
   addMessage,
@@ -32,6 +32,7 @@ export function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [agentReady, setAgentReady] = useState(false);
   const [agentState, setAgentState] = useState<AgentDialogueState>(() =>
     createEmptyDialogueState()
@@ -96,11 +97,12 @@ export function ChatPage() {
 
   const send = async (event: FormEvent) => {
     event.preventDefault();
-    if (!profile || !text.trim() || busy || !agentReady) return;
+    if (!profile || profile.status !== "active" || !text.trim() || busy || !agentReady) return;
 
     const userText = text.trim();
     setText("");
     setBusy(true);
+    setErrorMessage("");
 
     try {
       const sourceMessageId = await addMessage(profile.uid, {
@@ -193,17 +195,7 @@ export function ChatPage() {
         agentConfidence: decision.confidence
       });
     } catch (cause) {
-      await addMessage(profile.uid, {
-        role: "assistant",
-        text:
-          cause instanceof Error
-            ? `No pude completar la acción: ${cause.message}`
-            : "No pude completar la acción.",
-        createdAt: new Date().toISOString(),
-        deliveryState: "error",
-        agentIntent: "error",
-        agentConfidence: 1
-      });
+      setErrorMessage(cause instanceof Error ? cause.message : "No pude completar la acción.");
     } finally {
       setBusy(false);
     }
@@ -215,7 +207,7 @@ export function ChatPage() {
         <div className="bot-avatar"><Sparkles size={22} /></div>
         <div className="chat-identity">
           <h1>Rafiki</h1>
-          <span><BrainCircuit size={13} /> {preferences.useGeminiFallback !== false ? "Agente híbrido · Core local + Gemini" : "Agente privado · solo Core local"}</span>
+          <span><BrainCircuit size={13} /> {demoMode ? "Demostración · modo local" : isGeminiEnabled(preferences) ? "Gemini · intérprete principal" : "Agente privado · modo local"}</span>
         </div>
         <div className="pending-counter" data-count={pending.length}>
           <BellRing size={17} />
@@ -225,7 +217,7 @@ export function ChatPage() {
 
       <section className="chat-scroll">
         <div className="privacy-banner">
-          🔒 Modo híbrido activo: tus recordatorios directos se procesan localmente en 0 ms y Gemini actúa como respaldo inteligente.
+          {demoMode || !isGeminiEnabled(preferences) ? "Tus mensajes se interpretan en modo local." : "Gemini interpreta tus mensajes usando tu contexto y hasta 50 recordatorios pendientes. Rafiki valida las acciones antes de guardarlas."}
         </div>
 
         {messages.map((message) => {
@@ -277,6 +269,7 @@ export function ChatPage() {
         <div ref={endRef} />
       </section>
 
+      {errorMessage && <p role="alert" className="error-box">{errorMessage}</p>}
       <form className="message-composer" onSubmit={send}>
         <textarea
           value={text}

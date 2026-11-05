@@ -8,6 +8,7 @@ import {
   Smartphone
 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
+import { isGeminiEnabled } from "../agent/geminiFallback";
 import { DEFAULT_AGENT_PREFERENCES } from "../agent/defaults";
 import { app, demoMode } from "../config/firebase";
 import { useAuth } from "../context/AuthContext";
@@ -170,13 +171,13 @@ export function SettingsPage() {
 
             <label className="toggle-row">
               <span>
-                <strong>Respaldo inteligente con Gemini (Modo Híbrido)</strong>
-                <small>Usa el motor local sin costo para comandos directos y consulta a Gemini (Free Tier) solo cuando una frase sea compleja o conversacional.</small>
+                <strong>Usar Gemini para interpretar mis mensajes</strong>
+                <small>Gemini será el intérprete principal. Se enviarán a Google tus mensajes, preferencias y hasta 50 recordatorios pendientes. Si lo desactivas, usarás el modo local.</small>
               </span>
               <input
                 type="checkbox"
-                checked={agentPreferences.useGeminiFallback !== false}
-                onChange={(event) => setPreference("useGeminiFallback", event.target.checked)}
+                checked={isGeminiEnabled(agentPreferences)}
+                onChange={(event) => setPreference("useGemini", event.target.checked)}
               />
             </label>
 

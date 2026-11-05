@@ -1,41 +1,16 @@
 import { processAgentMessage } from "./core";
 import { composeReminderList } from "./responseComposer";
-import { getZonedDayRange } from "./dateTime";
+import { getZonedDayRange, getWeekdayInTimezone } from "./dateTime";
+import { auth, demoMode } from "../config/firebase";
+import { parseGeminiDecision, validateAgentDecision } from "./validation";
+import type { GeminiStructuredDecision } from "./validation";
+import { composeCreated, composeUpdated, composePostponed, composeStatusChanged, composeDialogueCancelled } from "./responseComposer";
 import type {
   AgentContext,
   AgentDecision,
-  AgentIntent,
   ReminderListFilter
 } from "./types";
 import type { Recurrence, Reminder } from "../types";
-
-interface GeminiStructuredDecision {
-  intent: AgentIntent;
-  confidence: number;
-  reply: string;
-  title?: string;
-  dueAtIso?: string;
-  recurrenceType?: "none" | "daily" | "weekdays" | "weekly";
-  filter?: ReminderListFilter;
-  targetReminderId?: string;
-  postponeMinutes?: number;
-  needsClarification?: boolean;
-  missingFields?: Array<"title" | "date" | "time">;
-}
-
-function shouldInvokeGeminiFallback(localDecision: AgentDecision, context: AgentContext): boolean {
-  if (context.preferences.useGeminiFallback === false) {
-    return false;
-  }
-  // Si el motor local no entendió la intención o tiene baja confianza, delegamos a Gemini
-  if (localDecision.intent === "unknown") {
-    return true;
-  }
-  if (localDecision.confidence < 0.78) {
-    return true;
-  }
-  return false;
-}
 
 function filterReminders(
   reminders: Reminder[],
@@ -60,42 +35,36 @@ function filterReminders(
     .sort((a, b) => new Date(a.nextTriggerAt).getTime() - new Date(b.nextTriggerAt).getTime());
 }
 
-async function fetchGeminiDecision(
-  context: AgentContext
-): Promise<GeminiStructuredDecision | null> {
-  const pendingReminders = context.reminders
-    .filter((r) => r.status === "pending")
-    .slice(0, 15)
-    .map((r) => ({
-      id: r.id,
-      title: r.title,
-      nextTriggerAt: r.nextTriggerAt,
-      recurrenceType: r.recurrence?.type || "none"
-    }));
+export function isGeminiEnabled(preferences: AgentContext["preferences"]): boolean {
+  return preferences.useGemini ?? preferences.useGeminiFallback ?? true;
+}
 
-  const payload = {
-    input: context.input,
-    nowIso: context.now.toISOString(),
-    timezone: context.timezone,
-    displayName: context.displayName,
-    preferences: context.preferences,
-    pendingState: context.state.pending,
-    reminders: pendingReminders
-  };
-
-  // Gemini se consulta exclusivamente a través del servidor.
+async function fetchGeminiDecision(context: AgentContext): Promise<GeminiStructuredDecision | null> {
+  if (!auth?.currentUser) throw new Error("Inicia sesión para utilizar Gemini.");
+  const token = await auth.currentUser.getIdToken();
+  let response: Response;
   try {
-    const response = await fetch("/api/gemini", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+    response = await fetch("/api/gemini", {
+      method: "POST", signal: AbortSignal.timeout(20000),
+      headers: { "Content-Type": "application/json", Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ input: context.input })
     });
-    if (!response.ok) return null;
-    const data = await response.json();
-    return data?.ok && data?.decision ? data.decision as GeminiStructuredDecision : null;
-  } catch {
-    return null;
+  } catch { return null; }
+  // Only provider outages permit local fallback; access and quota errors never do.
+  if (!response.ok) {
+    let reason = "";
+    try { reason = (await response.json()).reason || ""; } catch { /* no raw server errors */ }
+    if (response.status === 502 || response.status === 504 || (response.status === 503 && reason === "missing_api_key")) return null;
+    const message = response.status === 401 ? "Tu sesión no es válida. Inicia sesión de nuevo."
+      : response.status === 403 ? "Tu cuenta o configuración no permite usar Gemini."
+      : response.status === 429 ? "Alcanzaste el límite de consultas. Intenta más tarde."
+      : response.status === 422 ? "No pude validar la respuesta. Aclara la actividad, fecha o recordatorio."
+      : "No fue posible validar la solicitud. Intenta de nuevo.";
+    throw new Error(message);
   }
+  const data = await response.json();
+  if (!data?.ok) throw new Error("Respuesta del servidor inválida.");
+  return parseGeminiDecision(data.decision, new Date(), context.reminders.filter((r) => r.status === "pending").map((r) => r.id));
 }
 
 function mapGeminiToAgentDecision(
@@ -109,8 +78,10 @@ function mapGeminiToAgentDecision(
     updatedAt: nowIso
   };
 
+  if (gemini.confidence < 0.78) return { ...fallbackDecision, intent: gemini.intent, source: "gemini", reply: "¿Puedes aclarar la actividad, fecha o recordatorio que quieres gestionar?" };
+  if (gemini.intent === "cancel_dialogue") return { ...fallbackDecision, intent: gemini.intent, source: "gemini", reply: composeDialogueCancelled(context.preferences), nextState: { ...baseState, pending: null } };
   if (gemini.intent === "create_reminder") {
-    if (gemini.needsClarification || !gemini.title || !gemini.dueAtIso) {
+    if (gemini.needsClarification || gemini.missingFields?.length || !gemini.title || !gemini.dueAtIso) {
       const missing: Array<"title" | "date" | "time"> =
         gemini.missingFields && gemini.missingFields.length
           ? gemini.missingFields
@@ -126,7 +97,7 @@ function mapGeminiToAgentDecision(
           ...baseState,
           pending: {
             kind: "create_reminder",
-            originalInput: gemini.title ? `Recuérdame ${gemini.title}` : context.input,
+            originalInput: [context.state.pending?.originalInput, context.input].filter(Boolean).join(" ").slice(0, 2000),
             missing,
             createdAt: nowIso
           }
@@ -142,7 +113,7 @@ function mapGeminiToAgentDecision(
 
     const recurrence: Recurrence = {
       type: gemini.recurrenceType || "none",
-      ...(gemini.recurrenceType === "weekly" ? { weekday: parsedDate.getDay() } : {})
+      ...(gemini.recurrenceType === "weekly" ? { weekday: getWeekdayInTimezone(parsedDate, context.timezone) } : {})
     };
 
     return {
@@ -154,7 +125,7 @@ function mapGeminiToAgentDecision(
         dueAt: parsedDate.toISOString(),
         recurrence
       },
-      reply: gemini.reply,
+      reply: composeCreated(context.input, gemini.title.trim(), parsedDate, context.timezone, context.preferences),
       nextState: { ...baseState, pending: null },
       source: "gemini"
     };
@@ -186,12 +157,15 @@ function mapGeminiToAgentDecision(
         intent: gemini.intent,
         confidence: gemini.confidence || 0.75,
         action: { type: "none" },
-        reply: gemini.reply || fallbackDecision.reply,
+        reply: "¿Cuál de tus recordatorios pendientes quieres gestionar?",
         nextState: baseState,
         source: "gemini"
       };
     }
 
+    if (gemini.needsClarification || gemini.missingFields?.length) {
+      return { intent: gemini.intent, confidence: gemini.confidence, action: { type: "none" }, reply: gemini.reply, source: "gemini", nextState: { ...baseState, lastReferencedReminderId: target.id, pending: gemini.intent === "update_reminder" ? { kind: "update_reminder", originalInput: context.input, reminderId: target.id, reminderTitle: target.title, missing: ["date", "time"], createdAt: nowIso } : baseState.pending } };
+    }
     if (gemini.intent === "complete_reminder" || gemini.intent === "cancel_reminder") {
       const status = gemini.intent === "complete_reminder" ? "completed" : "cancelled";
       return {
@@ -203,7 +177,7 @@ function mapGeminiToAgentDecision(
           reminderTitle: target.title,
           status
         },
-        reply: gemini.reply,
+        reply: composeStatusChanged(context.input, target.title, status, context.preferences),
         nextState: { ...baseState, pending: null, lastReferencedReminderId: target.id },
         referencedReminder: target,
         source: "gemini"
@@ -223,7 +197,7 @@ function mapGeminiToAgentDecision(
           minutes,
           nextTriggerAt
         },
-        reply: gemini.reply,
+        reply: composePostponed(target.title, minutes, new Date(nextTriggerAt), context.timezone, context.preferences),
         nextState: { ...baseState, pending: null, lastReferencedReminderId: target.id },
         referencedReminder: target,
         source: "gemini"
@@ -243,7 +217,7 @@ function mapGeminiToAgentDecision(
             title: (gemini.title || target.title).trim(),
             dueAt: parsedDue.toISOString()
           },
-          reply: gemini.reply,
+          reply: composeUpdated((gemini.title || target.title).trim(), parsedDue, context.timezone, context.preferences),
           nextState: { ...baseState, pending: null, lastReferencedReminderId: target.id },
           referencedReminder: target,
           source: "gemini"
@@ -262,27 +236,16 @@ function mapGeminiToAgentDecision(
   };
 }
 
-/**
- * Motor híbrido principal:
- * 1) Ejecuta primero Rafiki Agent Core localmente (0 ms, $0 USD, sin gastar cuota).
- * 2) Si la instrucción no se reconoce o tiene baja confianza, consulta a Gemini API (Free Tier) como respaldo.
- */
-export async function processHybridAgentMessage(
-  context: AgentContext
-): Promise<AgentDecision> {
-  const localDecision: AgentDecision = {
-    ...processAgentMessage(context),
-    source: "local"
-  };
-
-  if (!shouldInvokeGeminiFallback(localDecision, context)) {
-    return localDecision;
+/** Gemini interprets first. Local Core is an explicit offline/outage fallback. */
+export async function processHybridAgentMessage(context: AgentContext): Promise<AgentDecision> {
+  if (demoMode || !isGeminiEnabled(context.preferences)) {
+    return validateAgentDecision({ ...processAgentMessage(context), source: "local" }, context);
   }
-
-  const geminiResult = await fetchGeminiDecision(context);
-  if (!geminiResult) {
-    return localDecision;
+  const gemini = await fetchGeminiDecision(context);
+  if (!gemini) {
+    const local = validateAgentDecision({ ...processAgentMessage(context), source: "local" }, context);
+    return { ...local, reply: "Gemini no está disponible; usé el modo local. " + local.reply };
   }
-
-  return mapGeminiToAgentDecision(geminiResult, context, localDecision);
+  const noAction: AgentDecision = { intent: "unknown", confidence: 0, action: { type: "none" }, reply: "¿Puedes aclarar tu solicitud?", nextState: context.state, source: "gemini" };
+  return validateAgentDecision(mapGeminiToAgentDecision(gemini, context, noAction), context);
 }

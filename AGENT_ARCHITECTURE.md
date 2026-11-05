@@ -1,72 +1,11 @@
-# Arquitectura del agente — Rafiki Agent Core
+# Arquitectura 0.6.1
 
-## Objetivo
+Mensaje → endpoint /api/gemini → sesión Firebase verificada + perfil activo → cuota transaccional → contexto propio desde Firestore → Gemini → validación estructural y semántica → decisión → comprobación de sesión/recordatorio → escritura bajo reglas Firestore.
 
-Interpretar y ejecutar instrucciones de recordatorios sin depender de un modelo generativo externo.
+Gemini interpreta primero. Agent Core solo actúa si el usuario elige modo local, en demostración o ante indisponibilidad del proveedor. Los errores de permisos, cuota y decisiones inválidas detienen la acción.
 
-## Flujo
+Las claves del proveedor y de Firebase Admin permanecen en el servidor. Un rol guardado en el perfil no concede autoridad: la administración exige un custom claim firmado.
 
-```text
-Mensaje
-  ↓
-Intent Router
-  ↓
-Extracción de fecha, hora, recurrencia y referencia
-  ↓
-Validación de confianza y ambigüedad
-  ↓
-Selección de skill
-  ↓
-Ejecución controlada
-  ↓
-Response Composer
-  ↓
-Persistencia de memoria conversacional privada
-```
+La cuota se guarda en geminiUsage/{uid}, inaccesible desde clientes. Los administradores de la aplicación no pueden leer contenidos privados de otras cuentas.
 
-## Intenciones soportadas
-
-- `create_reminder`
-- `list_reminders`
-- `complete_reminder`
-- `cancel_reminder`
-- `postpone_reminder`
-- `update_reminder`
-- `greeting`
-- `help`
-- `cancel_dialogue`
-- `unknown`
-
-## Memoria conversacional
-
-La memoria almacena solamente la acción pendiente y los datos faltantes. Ejemplo:
-
-```json
-{
-  "pending": {
-    "kind": "create_reminder",
-    "originalInput": "Recuérdame llamar al médico mañana",
-    "missing": ["time"]
-  }
-}
-```
-
-Se guarda en `users/{uid}/agent/session`, protegida por las mismas reglas privadas del usuario.
-
-## Confianza
-
-Cada interpretación produce un nivel de confianza. Las instrucciones claras se ejecutan. Cuando falta información o existe ambigüedad, el agente pregunta antes de crear o modificar un recordatorio.
-
-## Respuestas naturales
-
-El compositor usa variantes controladas, no texto generado libremente. Esto permite:
-
-- mantener una personalidad coherente;
-- evitar respuestas repetitivas;
-- impedir alucinaciones;
-- conservar costos de IA en cero;
-- revisar todas las respuestas posibles.
-
-## Privacidad
-
-El agente se ejecuta en el cliente. No envía el mensaje a Gemini, OpenAI ni otro proveedor. Las acciones se sincronizan con Firestore únicamente después de validarse.
+Los detalles, limitaciones y pasos de migración están en RELEASE_0.6.1.md.

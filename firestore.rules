@@ -1,63 +1,76 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null;
+    function self(uid) { return request.auth != null && request.auth.uid == uid; }
+    function admin() {
+      return request.auth != null && request.auth.token.platform_admin == true
+        && get(/databases/$(database)/documents/platformUsers/$(request.auth.uid)).data.status == 'active';
     }
-
-    function isSelf(uid) {
-      return signedIn() && request.auth.uid == uid;
+    function owner(uid) { return self(uid) && get(/databases/$(database)/documents/platformUsers/$(uid)).data.status == 'active'; }
+    function validProfile(d) {
+      return d.uid is string && d.email is string && d.displayName is string
+        && d.displayName.size() > 0 && d.displayName.size() <= 100
+        && d.timezone is string && d.timezone.size() <= 80
+        && d.role in ['user', 'platform_admin'] && d.status in ['pending', 'active', 'suspended'];
     }
-
-    function isPlatformAdmin() {
-      return signedIn() && (
-        request.auth.token.platform_admin == true ||
-        (exists(/databases/$(database)/documents/platformUsers/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/platformUsers/$(request.auth.uid)).data.role == "platform_admin")
-      );
-    }
-
-    function isActiveUser(uid) {
-      return exists(/databases/$(database)/documents/platformUsers/$(uid))
-        && get(/databases/$(database)/documents/platformUsers/$(uid)).data.status == "active";
-    }
-
-    // Datos administrativos. Compatible tanto con Cloud Functions como con el Plan Spark gratuito.
     match /platformUsers/{uid} {
-      allow read: if isSelf(uid) || isPlatformAdmin();
-      allow create: if isSelf(uid)
-        && request.resource.data.uid == uid;
-      allow update: if (isSelf(uid)
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(["displayName", "photoURL", "lastSeenAt", "timezone", "agentPreferences", "updatedAt"]))
-        || isPlatformAdmin();
+      allow read: if self(uid) || admin();
+      allow create: if self(uid) && validProfile(request.resource.data)
+        && request.resource.data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'status', 'role', 'timezone', 'agentPreferences', 'reminderCount', 'deviceCount', 'createdAt', 'updatedAt', 'lastSeenAt'])
+        && request.resource.data.uid == uid && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role == 'user' && request.resource.data.status == 'pending'
+        && request.resource.data.reminderCount == 0 && request.resource.data.deviceCount == 0
+        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if validProfile(request.resource.data) && (
+        (self(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL', 'lastSeenAt', 'timezone', 'agentPreferences', 'updatedAt']))
+        || (admin() && resource.data.role == 'user' && uid != request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']))
+      );
       allow delete: if false;
     }
-
-    // Invitaciones
-    match /accessInvitations/{emailKey} {
-      allow read, write: if isPlatformAdmin();
+    match /accessInvitations/{emailKey} { allow read, write: if admin(); }
+    function validReminder(d) {
+      return d.keys().hasAll(['title', 'dueAt', 'nextTriggerAt', 'timezone', 'status', 'recurrence', 'createdAt', 'updatedAt'])
+        && d.keys().hasOnly(['title', 'description', 'dueAt', 'nextTriggerAt', 'timezone', 'status', 'recurrence', 'createdAt', 'updatedAt', 'notifiedAt', 'sourceMessageId', 'lastNotifiedAt'])
+        && d.title is string && d.title.matches('.*[^\\s].*') && d.title.size() <= 300
+        && d.dueAt is timestamp && d.nextTriggerAt is timestamp
+        && d.timezone is string && d.timezone.size() <= 80
+        && d.status in ['pending', 'completed', 'cancelled']
+        && d.recurrence is map && d.recurrence.keys().hasOnly(['type', 'weekday'])
+        && d.recurrence.type in ['none', 'daily', 'weekdays', 'weekly']
+        && (!('weekday' in d.recurrence) || (d.recurrence.weekday is int && d.recurrence.weekday >= 0 && d.recurrence.weekday <= 6));
     }
-
-    // Contenido privado: únicamente el propietario activo.
-    // No existe excepción para platform_admin.
     match /users/{uid} {
-      allow read, write: if isSelf(uid) && isActiveUser(uid);
-
-      match /{document=**} {
-        allow read, write: if isSelf(uid) && isActiveUser(uid);
-      }
-    }
-
-    // Métricas agregadas sin contenido privado.
-    match /platformMetrics/{document=**} {
-      allow read: if isPlatformAdmin();
+      allow read: if owner(uid);
       allow write: if false;
+      match /reminders/{id} {
+        allow read, delete: if owner(uid);
+        allow create: if owner(uid) && validReminder(request.resource.data)
+          && request.resource.data.status == 'pending'
+          && request.resource.data.dueAt > request.time && request.resource.data.nextTriggerAt > request.time
+          && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+        allow update: if owner(uid) && validReminder(request.resource.data) && resource.data.status == 'pending'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'dueAt', 'nextTriggerAt', 'recurrence', 'status', 'notifiedAt', 'updatedAt'])
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['dueAt', 'nextTriggerAt'])
+            || (request.resource.data.dueAt > request.time && request.resource.data.nextTriggerAt > request.time));
+      }
+      match /messages/{id} {
+        allow read: if owner(uid);
+        allow create: if owner(uid) && request.resource.data.keys().hasOnly(['role', 'text', 'createdAt', 'reminderId', 'deliveryState', 'agentIntent', 'agentConfidence'])
+          && request.resource.data.role in ['user', 'assistant', 'system']
+          && request.resource.data.text is string && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 4000
+          && request.resource.data.createdAt == request.time;
+      }
+      match /agent/session {
+        allow read: if owner(uid);
+        allow create, update: if owner(uid) && request.resource.data.keys().hasOnly(['pending', 'lastReferencedReminderId', 'updatedAt'])
+          && (request.resource.data.pending == null || request.resource.data.pending is map)
+          && request.resource.data.updatedAt is string;
+      }
+      match /devices/{id} { allow read, write: if owner(uid); }
     }
-
-    match /{document=**} {
-      allow read, write: if false;
-    }
+    match /platformMetrics/{document=**} { allow read: if admin(); }
+    match /{document=**} { allow read, write: if false; }
   }
 }

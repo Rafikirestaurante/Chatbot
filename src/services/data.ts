@@ -13,8 +13,9 @@ import {
   setDoc,
   updateDoc
 } from "firebase/firestore";
+import { assertFutureDate, assertTitle, assertMinutes, assertDocumentId } from "../agent/validation";
 import { httpsCallable } from "firebase/functions";
-import { db, demoMode, functions } from "../config/firebase";
+import { auth, db, demoMode, functions } from "../config/firebase";
 import { addCalendarDaysInTimezone, getWeekdayInTimezone } from "../agent/dateTime";
 import type {
   AdminUserRow,
@@ -37,6 +38,23 @@ import {
 } from "./demoStore";
 
 const iso = () => new Date().toISOString();
+async function assertActiveSelf(uid: string): Promise<void> {
+  assertDocumentId(uid);
+  if (demoMode) {
+    if (getDemoUser().uid !== uid || getDemoUser().status !== "active") throw new Error("Cuenta no autorizada.");
+    return;
+  }
+  if (!db || auth?.currentUser?.uid !== uid) throw new Error("La sesión no corresponde al usuario.");
+  const profile = await getDoc(doc(db, "platformUsers", uid));
+  if (profile.data()?.status !== "active") throw new Error("Tu cuenta no tiene acceso activo.");
+}
+async function assertOwnPending(uid: string, reminderId: string): Promise<void> {
+  await assertActiveSelf(uid);
+  assertDocumentId(reminderId);
+  const status = demoMode ? getDemoReminders().find((r) => r.id === reminderId)?.status
+    : (await getDoc(doc(db!, "users", uid, "reminders", reminderId))).data()?.status;
+  if (status !== "pending") throw new Error("El recordatorio no existe o ya no está pendiente.");
+}
 
 function assertFirebase(): void {
   if (!db || !functions) {
@@ -67,13 +85,14 @@ export async function registerCurrentUser(): Promise<AppUser> {
       const callable = httpsCallable(functions, "registerCurrentUser");
       const result = await callable();
       return result.data as AppUser;
-    } catch {
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code !== "functions/not-found" && code !== "functions/unavailable") throw error;
       // Si el proyecto está en el Plan Spark gratuito (sin Cloud Functions),
       // hace fallback directo a Firestore para no obligar a pagar el Plan Blaze.
     }
   }
 
-  const { auth } = await import("../config/firebase");
   const currentUser = auth?.currentUser;
   if (!currentUser) {
     throw new Error("Debes iniciar sesión.");
@@ -90,17 +109,15 @@ export async function registerCurrentUser(): Promise<AppUser> {
     if (refreshed) return refreshed;
   }
 
-  const email = (currentUser.email || "").trim().toLowerCase();
-  const adminEmail = (import.meta.env.VITE_ADMIN_EMAIL || "").trim().toLowerCase();
-  const isAdmin = Boolean(adminEmail && email === adminEmail);
+  const email = currentUser.email || "";
 
   const newProfile: AppUser = {
     uid: currentUser.uid,
     email,
     displayName: currentUser.displayName || email.split("@")[0] || "Usuario",
     photoURL: currentUser.photoURL || null,
-    status: "active",
-    role: isAdmin ? "platform_admin" : "user",
+    status: "pending",
+    role: "user",
     timezone: "America/Bogota",
     agentPreferences: {
       tone: "warm",
@@ -122,13 +139,6 @@ export async function registerCurrentUser(): Promise<AppUser> {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     lastSeenAt: serverTimestamp()
-  });
-
-  await addDoc(collection(db, "users", currentUser.uid, "messages"), {
-    role: "assistant",
-    text: "¡Hola! Soy Rafiki, tu agente híbrido de recordatorios. Puedes decirme: “Recuérdame pagar la luz mañana a las 8”.",
-    deliveryState: "sent",
-    createdAt: serverTimestamp()
   });
 
   return newProfile;
@@ -280,6 +290,11 @@ export async function addReminder(
   uid: string,
   reminder: Omit<Reminder, "id">
 ): Promise<string> {
+  await assertActiveSelf(uid);
+  assertTitle(reminder.title);
+  assertFutureDate(reminder.dueAt);
+  assertFutureDate(reminder.nextTriggerAt);
+  if (!["none", "daily", "weekdays", "weekly"].includes(reminder.recurrence.type)) throw new Error("Recurrencia inválida.");
   if (demoMode) {
     const id = crypto.randomUUID();
     setDemoReminders([...getDemoReminders(), { ...reminder, id }]);
@@ -303,6 +318,9 @@ export async function updateReminderDetails(
   reminderId: string,
   patch: { title: string; dueAt: string }
 ): Promise<void> {
+  await assertOwnPending(uid, reminderId);
+  assertTitle(patch.title);
+  assertFutureDate(patch.dueAt);
   if (demoMode) {
     setDemoReminders(
       getDemoReminders().map((item) =>
@@ -359,6 +377,7 @@ export async function advanceRecurringReminder(
   uid: string,
   reminder: Reminder
 ): Promise<void> {
+  await assertOwnPending(uid, reminder.id);
   const next = calculateNextOccurrence(reminder);
   if (!next) return;
 
@@ -396,6 +415,8 @@ export async function updateReminderStatus(
   reminderId: string,
   status: ReminderStatus
 ): Promise<void> {
+  await assertOwnPending(uid, reminderId);
+  if (status !== "completed" && status !== "cancelled") throw new Error("Estado inválido.");
   if (demoMode) {
     setDemoReminders(
       getDemoReminders().map((item) =>
@@ -419,6 +440,8 @@ export async function postponeReminder(
   reminderId: string,
   minutes: number
 ): Promise<void> {
+  await assertOwnPending(uid, reminderId);
+  assertMinutes(minutes);
   if (demoMode) {
     setDemoReminders(
       getDemoReminders().map((item) => {
@@ -452,6 +475,8 @@ export async function deleteReminder(
   uid: string,
   reminderId: string
 ): Promise<void> {
+  await assertActiveSelf(uid);
+  assertDocumentId(reminderId);
   if (demoMode) {
     setDemoReminders(
       getDemoReminders().filter((item) => item.id !== reminderId)

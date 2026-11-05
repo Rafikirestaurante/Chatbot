@@ -1,3 +1,5 @@
+> Informe histórico de la corrección anterior. Para 0.6.1 consultar RELEASE_0.6.1.md y VALIDATION_REPORT.md. Sus comandos son documentación; no se ejecutaron durante esta entrega.
+
 # Corrección de seguridad — 2026-10-15
 
 ## Resultado

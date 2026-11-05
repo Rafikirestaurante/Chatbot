@@ -50,7 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     const next = await getPlatformUser(firebaseUser.uid);
-    setProfile(next);
+    const token = await firebaseUser.getIdTokenResult();
+    setProfile(next ? { ...next, role: token.claims.platform_admin === true ? "platform_admin" : "user" } : null);
   };
 
   useEffect(() => {
@@ -62,10 +63,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         if (user) {
           const registered = await registerCurrentUser();
-          setProfile(registered);
+          const token = await user.getIdTokenResult();
+          setProfile({ ...registered, role: token.claims.platform_admin === true ? "platform_admin" : "user" });
         } else {
           setProfile(null);
         }
+      } catch {
+        setProfile(null);
       } finally {
         setLoading(false);
       }

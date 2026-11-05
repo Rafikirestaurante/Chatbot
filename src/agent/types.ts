@@ -22,6 +22,8 @@ export interface AgentPreferences {
   morningHour: number;
   afternoonHour: number;
   eveningHour: number;
+  useGemini?: boolean;
+  /** Legacy preference: false remains opt-out until the user saves settings. */
   useGeminiFallback?: boolean;
 }
 

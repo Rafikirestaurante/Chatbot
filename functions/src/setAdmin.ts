@@ -22,7 +22,7 @@ const auth = getAuth();
 const db = getFirestore();
 
 const user = await auth.getUserByEmail(email.trim().toLowerCase());
-await auth.setCustomUserClaims(user.uid, { platform_admin: true });
+await auth.setCustomUserClaims(user.uid, { ...user.customClaims, platform_admin: true });
 
 await db.doc(`platformUsers/${user.uid}`).set(
   {
