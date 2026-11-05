@@ -79,20 +79,6 @@ export async function registerCurrentUser(): Promise<AppUser> {
   if (demoMode) return getDemoUser();
   if (!db) throw new Error("Firebase no está configurado.");
 
-  // 1. Si Cloud Functions está desplegado (Plan Blaze), lo usa primero
-  if (functions) {
-    try {
-      const callable = httpsCallable(functions, "registerCurrentUser");
-      const result = await callable();
-      return result.data as AppUser;
-    } catch (error) {
-      const code = (error as { code?: string }).code;
-      if (code !== "functions/not-found" && code !== "functions/unavailable") throw error;
-      // Si el proyecto está en el Plan Spark gratuito (sin Cloud Functions),
-      // hace fallback directo a Firestore para no obligar a pagar el Plan Blaze.
-    }
-  }
-
   const currentUser = auth?.currentUser;
   if (!currentUser) {
     throw new Error("Debes iniciar sesión.");
@@ -107,6 +93,20 @@ export async function registerCurrentUser(): Promise<AppUser> {
     }).catch(() => undefined);
     const refreshed = await getPlatformUser(currentUser.uid);
     if (refreshed) return refreshed;
+  }
+
+  // 1. Si Cloud Functions está desplegado (Plan Blaze), lo usa primero
+  if (functions) {
+    try {
+      const callable = httpsCallable(functions, "registerCurrentUser");
+      const result = await callable();
+      return result.data as AppUser;
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code !== "functions/not-found" && code !== "functions/unavailable" && code !== "functions/internal") throw error;
+      // Si el proyecto está en el Plan Spark gratuito (sin Cloud Functions),
+      // hace fallback directo a Firestore para no obligar a pagar el Plan Blaze.
+    }
   }
 
   const email = currentUser.email || "";

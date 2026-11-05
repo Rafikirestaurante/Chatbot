@@ -17,12 +17,14 @@ import {
 import { auth, demoMode, googleProvider } from "../config/firebase";
 import { getDemoUser } from "../services/demoStore";
 import { getPlatformUser, registerCurrentUser } from "../services/data";
+import { accessErrorMessage } from "../services/accessErrors";
 import type { AppUser } from "../types";
 
 interface AuthContextValue {
   firebaseUser: User | null;
   profile: AppUser | null;
   loading: boolean;
+  accessError: string;
   demoMode: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
@@ -38,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AppUser | null>(
     demoMode ? getDemoUser() : null
   );
+  const [accessError, setAccessError] = useState("");
   const [loading, setLoading] = useState(!demoMode);
 
   const refreshProfile = async () => {
@@ -59,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return onAuthStateChanged(auth, async (user) => {
       setLoading(true);
+      setAccessError("");
       setFirebaseUser(user);
       try {
         if (user) {
@@ -68,7 +72,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setProfile(null);
         }
-      } catch {
+      } catch (error) {
+        setAccessError(accessErrorMessage(error, "profile"));
         setProfile(null);
       } finally {
         setLoading(false);
@@ -80,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       firebaseUser,
       profile,
+      accessError,
       loading,
       demoMode,
       signInWithGoogle: async () => {
@@ -100,7 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       refreshProfile
     }),
-    [firebaseUser, profile, loading]
+    [firebaseUser, profile, loading, accessError]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

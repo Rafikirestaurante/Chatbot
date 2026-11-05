@@ -1,21 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../config/firebase", () => ({ db: {}, functions: {}, demoMode: false, auth: { currentUser: { uid: "user-a" } } }));
+vi.mock("../config/firebase", () => ({ db: {}, functions: {}, demoMode: false, auth: { currentUser: { uid: "user-a", email: "user-a@example.invalid" } } }));
 vi.mock("firebase/firestore", async (importOriginal) => {
   const actual = await importOriginal<typeof import("firebase/firestore")>();
   return {
     ...actual,
     doc: vi.fn((...args) => args.slice(1).join("/")),
     getDoc: vi.fn(async () => ({ data: () => ({ status: "active" }) })),
-    updateDoc: vi.fn(),
+    updateDoc: vi.fn(async () => undefined),
+    setDoc: vi.fn(),
     collection: vi.fn(() => "messages-collection"),
     serverTimestamp: vi.fn(() => "server-time"),
     addDoc: vi.fn(async () => ({ id: "new-message" }))
   };
 });
 
-import { addDoc, getDoc, updateDoc } from "firebase/firestore";
-import { addMessage, addReminder, updateReminderStatus, postponeReminder } from "./data";
+vi.mock("firebase/functions", () => ({ httpsCallable: vi.fn() }));
+import { httpsCallable } from "firebase/functions";
+import { addDoc, getDoc, updateDoc, setDoc } from "firebase/firestore";
+import { addMessage, addReminder, updateReminderStatus, postponeReminder, registerCurrentUser } from "./data";
 
 describe("Firestore message persistence", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -85,5 +88,27 @@ describe("reminder execution boundary", () => {
   it("rejects invalid reminder dates before persistence", async () => {
     await expect(addReminder("user-a", { title: "Llamar", dueAt: "2020-01-01T00:00:00Z", nextTriggerAt: "2020-01-01T00:00:00Z", recurrence: { type: "none" } } as any)).rejects.toThrow("futuras");
     expect(addDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe("sign-in profile registration", () => {
+  beforeEach(() => vi.clearAllMocks());
+  it("loads an existing profile without depending on Cloud Functions", async () => {
+    vi.mocked(getDoc).mockResolvedValue({ exists: () => true, data: () => ({ uid: "user-a", role: "user", status: "active" }) } as any);
+    expect((await registerCurrentUser()).status).toBe("active");
+    expect(httpsCallable).not.toHaveBeenCalled();
+  });
+  it("creates only a pending normal user when Functions is unavailable", async () => {
+    vi.mocked(getDoc).mockResolvedValue({ exists: () => false } as any);
+    vi.mocked(httpsCallable).mockReturnValue((async () => { throw { code: "functions/internal" }; }) as any);
+    const profile = await registerCurrentUser();
+    expect(profile).toMatchObject({ role: "user", status: "pending" });
+    expect(setDoc).toHaveBeenCalledWith("platformUsers/user-a", expect.objectContaining({ role: "user", status: "pending" }));
+  });
+  it("does not bypass explicit permission denials from Functions", async () => {
+    vi.mocked(getDoc).mockResolvedValue({ exists: () => false } as any);
+    vi.mocked(httpsCallable).mockReturnValue((async () => { throw { code: "functions/permission-denied" }; }) as any);
+    await expect(registerCurrentUser()).rejects.toMatchObject({ code: "functions/permission-denied" });
+    expect(setDoc).not.toHaveBeenCalled();
   });
 });

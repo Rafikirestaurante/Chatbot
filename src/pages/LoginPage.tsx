@@ -1,11 +1,13 @@
 import { Bell, LockKeyhole, Mail } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { Navigate } from "react-router-dom";
+import { accessErrorMessage } from "../services/accessErrors";
 import { useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
   const {
     profile,
+    accessError,
     signInWithGoogle,
     signInWithEmail,
     signUpWithEmail
@@ -27,9 +29,7 @@ export function LoginPage() {
       else await signUpWithEmail(email, password);
     } catch (cause) {
       setError(
-        cause instanceof Error
-          ? cause.message
-          : "No fue posible completar el acceso."
+        accessErrorMessage(cause)
       );
     } finally {
       setBusy(false);
@@ -45,7 +45,13 @@ export function LoginPage() {
 
         <button
           className="google-button"
-          onClick={() => void signInWithGoogle()}
+          onClick={async () => {
+            setBusy(true);
+            setError("");
+            try { await signInWithGoogle(); }
+            catch (cause) { setError(accessErrorMessage(cause)); }
+            finally { setBusy(false); }
+          }}
           disabled={busy}
         >
           <span>G</span>
@@ -83,7 +89,7 @@ export function LoginPage() {
             </div>
           </label>
 
-          {error && <div className="error-box">{error}</div>}
+          {(error || accessError) && <div className="error-box" role="alert">{error || accessError}</div>}
 
           <button className="primary-button" disabled={busy}>
             {busy
@@ -96,7 +102,8 @@ export function LoginPage() {
 
         <button
           className="text-button"
-          onClick={() => setMode(mode === "login" ? "register" : "login")}
+          disabled={busy}
+          onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}
         >
           {mode === "login"
             ? "¿No tienes cuenta? Regístrate"
