@@ -55,6 +55,17 @@ describe("protected Gemini endpoint", () => {
     provider({ intent: "cancel_reminder", confidence: 1, reply: "ok", targetReminderId: "victim-reminder" });
     const res = response(); await handler(request(), res); expect(res.code).toBe(422);
   });
+  it("identifies missing datastore indexes without disclosing the error body", async () => {
+    collection.get.mockRejectedValueOnce({ code: 9, message: "private-url" });
+    const res = response(); await handler(request(), res);
+    expect(res.code).toBe(503); expect(res.body.reason).toBe("datastore_index");
+    expect(JSON.stringify(res.body)).not.toContain("private-url");
+  });
+  it("identifies service account permission errors", async () => {
+    vi.mocked(consumeQuota).mockRejectedValueOnce({ code: 7, message: "private-details" });
+    const res = response(); await handler(request(), res);
+    expect(res.code).toBe(503); expect(res.body.reason).toBe("datastore_permissions");
+  });
   it("rejects dates in the past", async () => {
     provider({ intent: "create_reminder", confidence: 1, reply: "ok", title: "Llamar", dueAtIso: "2020-01-01T00:00:00Z" });
     const res = response(); await handler(request(), res); expect(res.code).toBe(422);

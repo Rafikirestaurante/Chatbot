@@ -11,7 +11,11 @@ function services() {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
   if (!projectId || !clientEmail || !privateKey) throw new ApiError(503, "server_configuration", "El servidor de Rafiki no está configurado.");
-  const app = getApps().find((a) => a.name === "rafiki-api") ?? initializeApp({ credential: cert({ projectId, clientEmail, privateKey }), projectId }, "rafiki-api");
+  let app = getApps().find((a) => a.name === "rafiki-api");
+  if (!app) {
+    try { app = initializeApp({ credential: cert({ projectId, clientEmail, privateKey }), projectId }, "rafiki-api"); }
+    catch { throw new ApiError(503, "invalid_admin_credentials", "Revisa el formato de las credenciales privadas de Firebase en el servidor."); }
+  }
   return { auth: getAuth(app), db: getFirestore(app) };
 }
 

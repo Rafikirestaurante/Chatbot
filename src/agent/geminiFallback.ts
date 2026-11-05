@@ -55,12 +55,18 @@ async function fetchGeminiDecision(context: AgentContext): Promise<GeminiStructu
     let reason = "";
     try { reason = (await response.json()).reason || ""; } catch { /* no raw server errors */ }
     if (response.status === 502 || response.status === 504 || (response.status === 503 && reason === "missing_api_key")) return null;
-    const message = response.status === 401 ? "Tu sesión no es válida. Inicia sesión de nuevo."
+    const configurationMessages: Record<string, string> = {
+      server_configuration: "Falta configurar la conexión privada del servidor con Firebase.",
+      invalid_admin_credentials: "La conexión privada con Firebase no está bien configurada. Revisa las credenciales del servidor.",
+      datastore_permissions: "El servidor no tiene permiso para acceder a Firebase. Hay que revisar la cuenta de servicio.",
+      datastore_index: "Falta preparar un índice de Firebase para consultar los recordatorios."
+    };
+    const message = configurationMessages[reason] || (response.status === 401 ? "Tu sesión no es válida. Inicia sesión de nuevo."
       : response.status === 403 ? "Tu cuenta o configuración no permite usar Gemini."
       : response.status === 429 ? "Alcanzaste el límite de consultas. Intenta más tarde."
       : response.status === 422 ? "No pude validar la respuesta. Aclara la actividad, fecha o recordatorio."
       : response.status >= 500 ? "El servidor de Rafiki no pudo procesar el mensaje. Intenta más tarde; si continúa, hay que revisar el servicio."
-      : "No fue posible validar la solicitud. Intenta de nuevo.";
+      : "No fue posible validar la solicitud. Intenta de nuevo.");
     throw new Error(message);
   }
   const data = await response.json();

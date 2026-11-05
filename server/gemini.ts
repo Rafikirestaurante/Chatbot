@@ -110,6 +110,7 @@ export default async function handler(req: any, res: any) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ ok: false, reason: "method_not_allowed" });
   }
+  let stage = "authentication";
   try {
     const { uid, db, profile } = await authorize(req.headers || {});
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
@@ -121,10 +122,12 @@ export default async function handler(req: any, res: any) {
     const preferences = normalizeAgentPreferences(profile.agentPreferences);
     if (!preferences.useGemini) throw new ApiError(403, "gemini_disabled", "Gemini está desactivado en tu configuración.");
     const now = new Date();
+    stage = "quota";
     await consumeQuota(uid, now);
+    stage = "context";
     // Context comes exclusively from the authenticated user's records.
     const [remindersSnapshot, stateSnapshot] = await Promise.all([
-      db.collection('users/' + uid + '/reminders').where("status", "==", "pending").orderBy("nextTriggerAt", "asc").limit(50).get(),
+      db.collection('users/' + uid + '/reminders').where("status", "==", "pending").limit(50).get(),
       db.doc('users/' + uid + '/agent/session').get()
     ]);
     const reminders = remindersSnapshot.docs.map((doc: any) => {
@@ -140,6 +143,7 @@ export default async function handler(req: any, res: any) {
     const lastReference = typeof lastId === "string" && reminders.some((r: any) => r.id === lastId) ? lastId : null;
     const payload: GeminiRequestPayload = { input: body.input.trim(), nowIso: now.toISOString(), timezone, displayName: String(profile.displayName || "Usuario").slice(0, 100), preferences, pendingState, reminders };
     const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    stage = "provider";
     const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
       method: "POST",
       signal: AbortSignal.timeout(15000),
@@ -153,6 +157,7 @@ export default async function handler(req: any, res: any) {
     if (!response.ok) throw new ApiError(502, "upstream_error", "Gemini no está disponible temporalmente.");
     const data: any = await response.json();
     const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || "").join("");
+    stage = "decision";
     let decision;
     try { decision = parseGeminiDecision(JSON.parse(text), new Date(), reminders.map((r: any) => r.id)); }
     catch { throw new ApiError(422, "invalid_decision", "No pude validar la respuesta. Aclara la actividad, fecha o recordatorio."); }
@@ -160,6 +165,13 @@ export default async function handler(req: any, res: any) {
   } catch (error) {
     if (error instanceof ApiError) return res.status(error.status).json({ ok: false, reason: error.reason, message: error.message });
     if (error instanceof SyntaxError) return res.status(400).json({ ok: false, reason: "invalid_json", message: "La solicitud no contiene JSON válido." });
+    const rawCode = error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
+    const safeCodes = ["9", "7", "16", "failed-precondition", "permission-denied", "unauthenticated", "app/invalid-credential", "app/invalid-service-account"];
+    const code = safeCodes.includes(rawCode) ? rawCode : "unknown";
+    console.error("[rafiki-api]", { stage, code });
+    if (["9", "failed-precondition"].includes(code)) return res.status(503).json({ ok: false, reason: "datastore_index", message: "Hay que preparar los índices de Firebase." });
+    if (["7", "permission-denied"].includes(code)) return res.status(503).json({ ok: false, reason: "datastore_permissions", message: "La cuenta de servicio no tiene acceso a Firebase." });
+    if (["16", "unauthenticated", "app/invalid-credential", "app/invalid-service-account"].includes(code)) return res.status(503).json({ ok: false, reason: "invalid_admin_credentials", message: "Revisa las credenciales privadas del servidor Firebase." });
     const timeout = error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name);
     return res.status(timeout ? 504 : 500).json({ ok: false, reason: timeout ? "timeout" : "exception", message: "No fue posible procesar la solicitud." });
   }

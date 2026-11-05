@@ -16,7 +16,14 @@ function services() {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
   if (!projectId || !clientEmail || !privateKey) throw new ApiError(503, "server_configuration", "El servidor de Rafiki no est\xE1 configurado.");
-  const app = getApps().find((a) => a.name === "rafiki-api") ?? initializeApp({ credential: cert({ projectId, clientEmail, privateKey }), projectId }, "rafiki-api");
+  let app = getApps().find((a) => a.name === "rafiki-api");
+  if (!app) {
+    try {
+      app = initializeApp({ credential: cert({ projectId, clientEmail, privateKey }), projectId }, "rafiki-api");
+    } catch {
+      throw new ApiError(503, "invalid_admin_credentials", "Revisa el formato de las credenciales privadas de Firebase en el servidor.");
+    }
+  }
   return { auth: getAuth(app), db: getFirestore(app) };
 }
 async function authorize(headers) {
@@ -207,6 +214,7 @@ async function handler(req, res) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ ok: false, reason: "method_not_allowed" });
   }
+  let stage = "authentication";
   try {
     const { uid, db, profile } = await authorize(req.headers || {});
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
@@ -218,9 +226,11 @@ async function handler(req, res) {
     const preferences = normalizeAgentPreferences(profile.agentPreferences);
     if (!preferences.useGemini) throw new ApiError(403, "gemini_disabled", "Gemini est\xE1 desactivado en tu configuraci\xF3n.");
     const now = /* @__PURE__ */ new Date();
+    stage = "quota";
     await consumeQuota(uid, now);
+    stage = "context";
     const [remindersSnapshot, stateSnapshot] = await Promise.all([
-      db.collection("users/" + uid + "/reminders").where("status", "==", "pending").orderBy("nextTriggerAt", "asc").limit(50).get(),
+      db.collection("users/" + uid + "/reminders").where("status", "==", "pending").limit(50).get(),
       db.doc("users/" + uid + "/agent/session").get()
     ]);
     const reminders = remindersSnapshot.docs.map((doc) => {
@@ -239,6 +249,7 @@ async function handler(req, res) {
     const lastReference = typeof lastId === "string" && reminders.some((r) => r.id === lastId) ? lastId : null;
     const payload = { input: body.input.trim(), nowIso: now.toISOString(), timezone, displayName: String(profile.displayName || "Usuario").slice(0, 100), preferences, pendingState, reminders };
     const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    stage = "provider";
     const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent", {
       method: "POST",
       signal: AbortSignal.timeout(15e3),
@@ -252,6 +263,7 @@ async function handler(req, res) {
     if (!response.ok) throw new ApiError(502, "upstream_error", "Gemini no est\xE1 disponible temporalmente.");
     const data = await response.json();
     const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("");
+    stage = "decision";
     let decision;
     try {
       decision = parseGeminiDecision(JSON.parse(text), /* @__PURE__ */ new Date(), reminders.map((r) => r.id));
@@ -262,6 +274,13 @@ async function handler(req, res) {
   } catch (error) {
     if (error instanceof ApiError) return res.status(error.status).json({ ok: false, reason: error.reason, message: error.message });
     if (error instanceof SyntaxError) return res.status(400).json({ ok: false, reason: "invalid_json", message: "La solicitud no contiene JSON v\xE1lido." });
+    const rawCode = error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
+    const safeCodes = ["9", "7", "16", "failed-precondition", "permission-denied", "unauthenticated", "app/invalid-credential", "app/invalid-service-account"];
+    const code = safeCodes.includes(rawCode) ? rawCode : "unknown";
+    console.error("[rafiki-api]", { stage, code });
+    if (["9", "failed-precondition"].includes(code)) return res.status(503).json({ ok: false, reason: "datastore_index", message: "Hay que preparar los \xEDndices de Firebase." });
+    if (["7", "permission-denied"].includes(code)) return res.status(503).json({ ok: false, reason: "datastore_permissions", message: "La cuenta de servicio no tiene acceso a Firebase." });
+    if (["16", "unauthenticated", "app/invalid-credential", "app/invalid-service-account"].includes(code)) return res.status(503).json({ ok: false, reason: "invalid_admin_credentials", message: "Revisa las credenciales privadas del servidor Firebase." });
     const timeout = error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name);
     return res.status(timeout ? 504 : 500).json({ ok: false, reason: timeout ? "timeout" : "exception", message: "No fue posible procesar la solicitud." });
   }

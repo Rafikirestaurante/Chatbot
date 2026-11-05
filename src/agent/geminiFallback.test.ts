@@ -23,6 +23,10 @@ describe("Gemini principal", () => {
     respond(null, status);
     await expect(processHybridAgentMessage(context())).rejects.toThrow();
   });
+  it("shows configuration errors without running the local fallback", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ reason: "invalid_admin_credentials" }), { status: 503 })));
+    await expect(processHybridAgentMessage(context())).rejects.toThrow("credenciales del servidor");
+  });
   it("uses validated Core on provider outage and explains it", async () => {
     respond(null, 502);
     const result = await processHybridAgentMessage(context());
