@@ -8,7 +8,7 @@
     "build": "npm run build:api && npm run test:runtime && tsc -p tsconfig.app.json --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "vitest run src api server",
+    "test": "vitest run src server",
     "firebase:emulators": "firebase emulators:start",
     "deploy:hosting": "npm run build && firebase deploy --only hosting",
     "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
@@ -18,8 +18,10 @@
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
     "test:rules": "firebase emulators:exec --only firestore --project demo-rafiki-061 \"vitest run tests/firestore.rules.test.ts\"",
     "typecheck:server": "tsc -p tsconfig.server.json",
-    "build:api": "esbuild server/gemini.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=api/gemini.js",
-    "test:runtime": "node scripts/check-api-runtime.mjs"
+    "build:api": "npm run build:api:gemini && npm run build:whatsapp",
+    "test:runtime": "node scripts/check-api-runtime.mjs",
+    "build:whatsapp": "esbuild server/whatsapp-handler.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=api/whatsapp/webhook.js",
+    "build:api:gemini": "esbuild server/gemini.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=api/gemini.js"
   },
   "dependencies": {
     "firebase": "^12.0.0",
